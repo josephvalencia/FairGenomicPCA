@@ -49,8 +49,8 @@ class FairPCA:
 
         self.ideal_loss = defaultdict(float)
        
-        min_eig = np.inf
-        max_eig = -np.inf
+        max_min_eig = -np.inf
+        min_max_eig = np.inf
 
         for name,data in self.data_groups.items():
 
@@ -59,43 +59,49 @@ class FairPCA:
             group_loss_k = loss(data,k_largest)
             self.ideal_loss[name] = group_loss_k
 
-            min_eig = min(min_eig,eigvals[0])
-            max_eig = max(max_eig,eigvals[-1])
+            max_min_eig = max(max_min_eig,eigvals[0])
+            min_max_eig = min(min_max_eig,eigvals[-1])
 
-        gap = max_eig - min_eig
+        gap = max_min_eig - min_max_eig
         self.alpha = gap + 0.001
 
     def square(self,x):
         return 0.5*jnp.power(x,2)
 
     def exp(self,x):
-        return jnp.exp(x)
+        return jnp.exp(-x)
 
     def compute_gradients(self):
 
         # needed to turn into a strongly convex problem
         regularization = 2*self.alpha*self.U
-
         U_grad = -2*self.data.T @ self.data @ self.U + regularization
         grads = [U_grad]
 
         subgroup_loss = []
+        subgroup_grad = []
 
-        for name,data in self.data_groups.items():
-            group_loss = loss(data,self.U) - self.ideal_loss[name]
+        for name,data_group in self.data_groups.items():
+            group_loss = loss(data_group,self.U) - self.ideal_loss[name]
             subgroup_loss.append(group_loss)
+            group_grad = -2*data_group.T @ data_group @ self.U
+            subgroup_grad.append(group_grad)
 
         if self.pairwise:
             # k choose 2 pairwise differences
             for i,j  in combinations(range(len(self.data_groups)),2):
                 delta_ij = subgroup_loss[i] - subgroup_loss[j]        
-                pairwise_grad = self.penalty_grad(delta_ij) + regularization 
-                print("G_{}{} : {}".format(i,j,pairwise_grad.shape))
+                print("Delta_{}{} = {}".format(i,j,delta_ij))
+                chain = subgroup_grad[i] + subgroup_grad[j]
+                print("chain",chain.shape)
+                pairwise_grad = self.penalty_grad(delta_ij) @ chain + regularization 
+                pairwise_grad = pairwise_grad / (np.linalg.norm(pairwise_grad) + 1e-32)
                 grads.append(pairwise_grad)
         else:
             # directly compute on subgroups
-            for i in range(subgroup_loss):
-                grad = self.penalty_grad(subgroup_loss[i]) + regularization
+            for i in range(len(subgroup_loss)):
+                grad = self.penalty_grad(subgroup_loss[i]) @ subgroup_grad[i] + regularization
+                grad = grad / (np.linalg.norm(grad)+1e-32)
                 grads.append(grad)
 
         return grads
@@ -104,7 +110,8 @@ class FairPCA:
 
         self.U = np.random.randn(self.data.shape[1],self.n_components)
 
-        for t in range(max_iter):
+        for t in range(1,max_iter):
+            print("t",t)
             gradients = self.compute_gradients() 
             direction = self.select_direction(gradients)
             
@@ -114,7 +121,7 @@ class FairPCA:
             
             # decreasing learning rate
             learning_rate = 1.0 / np.sqrt(t)
-            self.U = self.projected_gradient(self.U,direction,learning_rate)
+            self.U = self.orthogonal_projection(self.U,direction,learning_rate)
 
         return self.U
 
@@ -122,35 +129,53 @@ class FairPCA:
         # solve quadratic programming problem for dual function
 
         n = len(gradients)
-        coeffs = cp.Variable(n)
-        objective = cp.norm(coeffs.T @ gradients,p="fro")
+        x = cp.Variable(n)
+
+        # vectorize gradients for each objective and pack into a single matrix
+        #G = np.stack(gradients,axis=2)        
+        #G = G.reshape(-1,n)
+        
+        G = []
+
+        for g in gradients:
+            dim,n_components = g.shape
+            vec = g.reshape(-1)
+            G.append(vec)
+        
+        G = np.stack(G,axis=1)
+        P = G.T @ G
+        eigvals,eigvecs = np.linalg.eigh(P)
+        print("eigvals",eigvals)
+        
+        objective = (1/2)*cp.quad_form(x,P)
         
         ones = np.ones(n)
         zeros = np.zeros(n)
         basis = np.eye(n)
         
         # constraints enforce probability simplex
-        sum_to_one = ones.T @ coeffs == 1
-        non_negative =  -basis @ coeffs <= zeros
+        sum_to_one = ones.T @ x == 1
+        non_negative = -basis @ x <= zeros
         
-        prob = cp.Problem(cp.Minimize(objective),[sum_to_one,non_negative])
+        prob = cp.Problem(cp.Minimize(objective),[non_negative,sum_to_one])
         prob.solve()
 
-        lambda_hat = prob.value.tolist()
-        direction = np.zeros_like(self.U)
+        lambda_hat = x.value
+        direction = G @ lambda_hat
+        direction = direction.reshape(dim,n_components)
 
-        for i,l in enumerate(lambda_hat):
-            direction += l*gradients[i]
+        return -direction
 
-        return direction
-
-    def projected_gradient(self,current,direction,learning_rate):
+    def orthogonal_projection(self,current,direction,learning_rate):
         
         # use singular value decomposition to find orthogonal projection of update
         update = current + learning_rate*direction
-
-        u,s,vh = np.linalg.svd(update)
-        return vh @ vh.T
+        
+        # orthogonal Procrustes problem
+        u,s,vh = np.linalg.svd(update,full_matrices=False)
+        orth_proj = u @ vh
+        
+        return orth_proj
 
 def eigenstrat(data : np.ndarray,n_components):
 
@@ -158,14 +183,13 @@ def eigenstrat(data : np.ndarray,n_components):
     processed = preprocess(data)
     eig_vals,princ_comps = run_PCA(processed,n_components=n_components)
    
-    #  multilinear  regression on principal components
+    #  multilinear regression on principal components
     pc_coeff = np.matmul(data,princ_comps) / np.linalg.norm(princ_comps,axis=0,ord=2)**2 
     regression = np.matmul(pc_coeff,princ_comps.T)
 
     # subtract fitted values to remove population effect
     corrected = data-regression
     return corrected
-
 
 def preprocess(data : np.ndarray):
 
@@ -197,7 +221,7 @@ if __name__ == "__main__":
     full_data = np.concatenate(data,axis=0)
     data_groups = { i : group for i,group in enumerate(data) }
     
-    pca = FairPCA(full_data,data_groups,100)
+    pca = FairPCA(full_data,data_groups,100,pairwise=False)
     U = pca.run(10000)
 
     #stratified = eigenstrat(snp_test,n_components=10)
