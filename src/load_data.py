@@ -9,7 +9,3 @@ def parse_VCF(vcf_file):
 
     return data
 
-if __name__ == "__main__":
-
-    vcf_file = sys.argv[1]
-    vcf_data = parse_VCF(vcf_file)
