@@ -1,11 +1,11 @@
 import sys
 import gzip
 import numpy as np
+import time
 from scipy.linalg import eigh
 from itertools import combinations
 from collections import defaultdict
 from sklearn import preprocessing
-
 import jax.numpy as jnp
 from jax import grad
 import cvxpy as cp
@@ -37,39 +37,54 @@ def frank_wolfe_NSW(all_data,data_groups,d,learning_rate,epsilon):
         m,n = data.shape
         B = data.T @ data
         B_list.append(B)
+        print("group {} cov matrix {}".format(name,B.shape))
 
     X = d/n * np.eye(N=n,M=n)
     dual_gap = np.inf
     alpha = 0.5
+    print("A")
     welfare = nash_social_welfare(B_list,X,log=True,alpha=alpha)
-
+    print("B")
     eigvals,eigvecs = np.linalg.eigh(np.cov(all_data.T))
+    print("C")
     k_largest = eigvecs[:,-d:]
     ideal_loss = loss(all_data,k_largest)
-
+    curr_loss = loss(all_data,X)
+    print("D")
+    
     print("Nash social welfare", welfare)
     print("Ideal Reconstruction loss",ideal_loss) 
+    print("initial Reconstruction loss",curr_loss)
 
     while dual_gap > epsilon:
-
+        
         gradient = np.zeros(shape=(n,n))
-
+        
         for group in B_list:
             group_grad = 1 / (np.trace(group @ X) + alpha * np.linalg.norm(group,ord='fro'))
             gradient += group_grad * group
-        
+
+        # mode 1
         w,v = np.linalg.eigh(gradient)
         idx = np.argsort(w)
         w = w[idx]
         v = v[:,idx]
         v_top = v[:,-d:]
+        
+        '''
+        s = time.time()
+        # mode 2 
+        subset = [n-d,n-1] # n_components largest
+        w,v = eigh(gradient,subset_by_index=subset)
+        e = time.time()
+        b_times.append(e-s)
+        '''
         oracle = v_top @ v_top.T
         dual_gap = np.trace(gradient.T @ (oracle-X))
         X = (1-learning_rate) * X + learning_rate*oracle
         welfare = nash_social_welfare(B_list,X,alpha=alpha,log=True)
         
         print("dual_gap = {}, NSW = {}, tr(X) = {}".format(dual_gap,welfare,np.trace(X)))
-        u,s,vh = np.linalg.svd(X,full_matrices=False)
         reconstruction = np.linalg.norm(all_data - all_data @ X)**2
         print("reconstruction error = {} , ideal error = {}".format(reconstruction,ideal_loss))
     
@@ -84,7 +99,6 @@ def nash_social_welfare(B_list,X,log=True,alpha = 0.0):
     else:
         welfare = 1
         for group in B_list:
-            print(np.trace(group@X))
             welfare *= np.trace(group @ X) + alpha*np.trace(group)**2 
 
     return welfare
@@ -331,65 +345,3 @@ class FairPCA:
        
         print("Loss of orthogonal",np.linalg.norm(update-orth_proj,ord='fro'))
         return orth_proj
-
-def eigenstrat(data : np.ndarray,n_components):
-
-    # demean and normalize, run PCA
-    processed = preprocess(data)
-    eig_vals,princ_comps = run_PCA(processed,n_components=n_components)
-   
-    #  multilinear regression on principal components
-    pc_coeff = np.matmul(data,princ_comps) / np.linalg.norm(princ_comps,axis=0,ord=2)**2 
-    regression = np.matmul(pc_coeff,princ_comps.T)
-
-    # subtract fitted values to remove population effect
-    corrected = data-regression
-    return corrected
-
-def preprocess(data : np.ndarray):
-
-    M,N = data.shape
-    
-    # subtract row means
-    mu =  np.mean(data,axis=1)
-    mu = mu.reshape(-1,1)
-    data -= mu
-    
-    # normalize row by posterior
-    p_i = (1+mu*N)/(2+2*N)
-    p_i_comp = np.ones_like(p_i) - p_i
-    norm_term = np.sqrt(np.dot(p_i.T,p_i_comp))
-    data /= norm_term
-    return data
-
-if __name__ == "__main__":
-
-    train_npz = np.load("data/adult/adult.data.npz",allow_pickle=True)
-    test_npz = np.load("data/adult/adult.test.npz",allow_pickle=True)
-
-    train_data = train_npz['data']
-    test_data = test_npz['data']
-
-    train_scaled = preprocessing.scale(train_data)
-    labels = train_npz['labels']
-    racial_label_indices = np.char.startswith(labels,"race")
-    racial_labels = np.nonzero(racial_label_indices)[0]
-
-    #train_racial_groups = {0 : train_scaled}
-    train_racial_groups = {}
-   
-    for c in racial_labels.tolist():
-        group_index = train_data[:,c] == 1
-        group = train_scaled[group_index,:]
-        train_racial_groups[c] = group
-
-    #pca = FairPCA(train_scaled,train_racial_groups,4,pairwise=False,phi="square")
-    #U = pca.run(50000)
-    d = 10
-
-    X = frank_wolfe_NSW(train_scaled,train_racial_groups,d=d,learning_rate = 1e-1,epsilon=1e-15)
-
-    P = factors(X,d)
-
-    print(P.T @ P)
-    print(P @ P.T - X)
