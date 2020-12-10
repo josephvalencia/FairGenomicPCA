@@ -364,8 +364,8 @@ def preprocess(data : np.ndarray):
 
 if __name__ == "__main__":
 
-    train_npz = np.load("adult.data.npz",allow_pickle=True)
-    test_npz = np.load("adult.test.npz",allow_pickle=True)
+    train_npz = np.load("data/adult/adult.data.npz",allow_pickle=True)
+    test_npz = np.load("data/adult/adult.test.npz",allow_pickle=True)
 
     train_data = train_npz['data']
     test_data = test_npz['data']
