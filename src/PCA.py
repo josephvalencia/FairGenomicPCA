@@ -23,12 +23,12 @@ def run_PCA(data : np.ndarray,n_components=None):
     else:
         return eigh(corr)
 
-def loss(data : np.ndarray, projector):
+def loss_PCA(data : np.ndarray, projector):
 
     reconstruction = data  @ projector @ projector.T
     return np.linalg.norm(data - reconstruction,ord='fro')**2
 
-def frank_wolfe_NSW(all_data,data_groups,d,learning_rate,epsilon):
+def frank_wolfe_NSW(all_data,data_groups,d,learning_rate,epsilon,alpha=0.5):
 
     # optimize Nash social welfare objective using Frank-White Algorithm
     B_list = []
@@ -41,45 +41,28 @@ def frank_wolfe_NSW(all_data,data_groups,d,learning_rate,epsilon):
 
     X = d/n * np.eye(N=n,M=n)
     dual_gap = np.inf
-    alpha = 0.5
-    print("A")
+    
     welfare = nash_social_welfare(B_list,X,log=True,alpha=alpha)
-    print("B")
     eigvals,eigvecs = np.linalg.eigh(np.cov(all_data.T))
-    print("C")
     k_largest = eigvecs[:,-d:]
-    ideal_loss = loss(all_data,k_largest)
-    curr_loss = loss(all_data,X)
-    print("D")
+    ideal_loss = loss_PCA(all_data,k_largest)
+    curr_loss = loss_PCA(all_data,X)
     
     print("Nash social welfare", welfare)
     print("Ideal Reconstruction loss",ideal_loss) 
     print("initial Reconstruction loss",curr_loss)
 
+    # calculate gradient
     while dual_gap > epsilon:
-        
         gradient = np.zeros(shape=(n,n))
-        
         for group in B_list:
             group_grad = 1 / (np.trace(group @ X) + alpha * np.linalg.norm(group,ord='fro'))
             gradient += group_grad * group
 
-        # mode 1
-        w,v = np.linalg.eigh(gradient)
-        idx = np.argsort(w)
-        w = w[idx]
-        v = v[:,idx]
-        v_top = v[:,-d:]
-        
-        '''
-        s = time.time()
-        # mode 2 
         subset = [n-d,n-1] # n_components largest
         w,v = eigh(gradient,subset_by_index=subset)
-        e = time.time()
-        b_times.append(e-s)
-        '''
-        oracle = v_top @ v_top.T
+        
+        oracle = v @ v.T
         dual_gap = np.trace(gradient.T @ (oracle-X))
         X = (1-learning_rate) * X + learning_rate*oracle
         welfare = nash_social_welfare(B_list,X,alpha=alpha,log=True)
@@ -87,8 +70,8 @@ def frank_wolfe_NSW(all_data,data_groups,d,learning_rate,epsilon):
         print("dual_gap = {}, NSW = {}, tr(X) = {}".format(dual_gap,welfare,np.trace(X)))
         reconstruction = np.linalg.norm(all_data - all_data @ X)**2
         print("reconstruction error = {} , ideal error = {}".format(reconstruction,ideal_loss))
-    
-    return X
+
+    return factors(X,d)
 
 def nash_social_welfare(B_list,X,log=True,alpha = 0.0):
 
@@ -104,7 +87,6 @@ def nash_social_welfare(B_list,X,log=True,alpha = 0.0):
     return welfare
 
 def factors(X,d):
-
     # return matrix P size(n,d)  such that P.T @ P == I_d and X = P @ P.T
     
     w,v = np.linalg.eigh(X)
@@ -119,7 +101,7 @@ def factors(X,d):
     P = v_top @ lambda_mat
     return P
 
-class FairPCA:
+class FairPCA(PCA):
 
     def __init__(self,data,groups,n_components,phi = "square",pairwise=True):
         
@@ -154,7 +136,7 @@ class FairPCA:
             #eigvals,eigvecs = run_PCA(data)
             eigvals,eigvecs = np.linalg.eigh(all_data.T @ all_data)
             k_largest = eigvecs[:,-self.n_components:]
-            group_loss_k = loss(data,k_largest)
+            group_loss_k = loss_PCA(data,k_largest)
             self.ideal_loss[name] = group_loss_k
 
             max_min_eig = max(max_min_eig,eigvals[0])
@@ -234,11 +216,11 @@ class FairPCA:
     def track_progress(self):
 
         disparities  = []        
-        overall_loss = loss(self.data,self.U)
+        overall_loss = loss_PCA(self.data,self.U)
         print("overall loss {}".format(overall_loss))
 
         for name,data_group in self.data_groups.items():
-            group_loss = loss(data_group,self.U) - self.ideal_loss[name]
+            group_loss = loss_PCA(data_group,self.U) - self.ideal_loss[name]
             disparities.append(group_loss)
 
         if self.pairwise:
