@@ -30,13 +30,20 @@ def load_1KG_annotations(annot_file):
     inFile.close()
     return annotation
 
-if __name__ == "__main__":
+def keep_top_variance(train_data,top_snps):
 
-    mat_file = sys.argv[1]
-    id_file = sys.argv[2]
-    pop_file = sys.argv[3]
+    variance = train_data.var(axis=0)
+    idx = np.argsort(-variance)
+    train_data = train_data[:,idx]
+    train_data = train_data[:,:top_snps]
 
-    genotype = load_1KG_genotype(mat_file)
-    ids = load_1KG_annotations(id_file)
-    pop = load_1KG_annotations(pop_file)
+    return train_data
+
+def keep_random(train_data,top_snps):
+
+    n,m = train_data.shape
+    idx = np.random.choice(np.arange(m),size=top_snps)
+    train_data = train_data[:,idx]
+    return train_data
+
 
