@@ -42,12 +42,12 @@ if __name__ == "__main__":
 
     NUM_COMPONENTS = 22
 
-    '''
     fwn = FrankWolfeNash(NUM_COMPONENTS)
     fwn.run(train_scaled,train_racial_groups,learning_rate = 1e-1,epsilon=1e-4)
   
     # extract principal components and correlation matrices
     PC = fwn.PC
+    print("PC from Frank-Wolfe-Nash",PC)
     corr_list = fwn.corr_list
 
     save_prefix = "ADULT_FW_{}".format(NUM_COMPONENTS)
@@ -55,15 +55,13 @@ if __name__ == "__main__":
 
     vanilla_pca = PCA(n_components=NUM_COMPONENTS)
     vanilla_pca.run(train_scaled)
-    #PC = vanilla_pca.components_.T
     PC = vanilla_pca.PC
+    print("PC from Vanilla",PC)
 
     save_prefix = "ADULT_PCA_{}".format( NUM_COMPONENTS)
     summarize(save_prefix,PC,corr_list,train_scaled,NUM_COMPONENTS)
 
-   '''
-
     pareto = ParetoPCA(NUM_COMPONENTS)
-    pareto.run(train_scaled,train_racial_groups,max_iter=10000)
+    pareto.run(train_scaled,train_racial_groups,max_iter=10000,pairwise=False)
 
 

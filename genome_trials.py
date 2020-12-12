@@ -32,10 +32,8 @@ if __name__ == "__main__":
     le = preprocessing.LabelEncoder()
     racial_labels = le.fit_transform(train_labels).ravel()
     
-    '''
     NUM_TOP_SNP = 500
     train_data = keep_top_variance(train_data,NUM_TOP_SNP)
-    '''
     
     train_racial_groups = {}
 
@@ -49,7 +47,6 @@ if __name__ == "__main__":
 
     NUM_COMPONENTS = 22
     
-    '''
     fwn = FrankWolfeNash(NUM_COMPONENTS)
     fwn.run(train_scaled,train_racial_groups,learning_rate = 1e-1,epsilon=1e-4)
   
@@ -68,6 +65,4 @@ if __name__ == "__main__":
     
     save_prefix = "1000G_PCA_{}_{}".format("ALL", NUM_COMPONENTS)
     summarize(save_prefix,PC,corr_list,train_scaled,NUM_COMPONENTS)
-    '''
 
-    pareto = ParetoPCA

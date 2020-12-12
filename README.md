@@ -8,4 +8,16 @@ This is an implementation of several dimensionality reduction methods to compare
 
 I compared these algorithms on the Adult and Credit datasets and replicate experiments from [Price et al 2006](https://www.nature.com/articles/ng1847)
 
-You can download plink 1.9 [here](https://www.cog-genomics.org/plink2)
+The central dependencies for this project include pandas, numpy, scipy, jax, scikit-learn, and cvxpy. I have included both a pip-freeze.txt and a conda list if you have issues with libraries. (I used conda)
+
+To test, please run:
+
+```python genome_trials.py```
+
+This is a small test on only the 500 SNPs with maximum variance. If you would like to test more, you can increase the KEEP_TOP_SNPs constant.
+
+Also run
+
+```python adult_trials.py```
+
+You will see similar output, but the Pareto-PCA method will run and never finish.

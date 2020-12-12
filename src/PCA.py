@@ -115,7 +115,7 @@ class FrankWolfeNash(PCA):
 
 class ParetoPCA(PCA):
 
-    def __init__(self,data,groups,n_components,phi = "square",pairwise=True):
+    def __init__(self,n_components,phi = "square"):
 
         super().__init__(n_components)
 
@@ -140,7 +140,7 @@ class ParetoPCA(PCA):
         for name,data in self.data_groups.items():
 
             #eigvals,eigvecs = run_PCA(data)
-            eigvals,eigvecs = np.linalg.eigh(all_data.T @ all_data)
+            eigvals,eigvecs = np.linalg.eigh(self.data.T @ self.data)
             k_largest = eigvecs[:,-self.n_components:]
             group_loss_k = loss_PCA(data,k_largest)
             self.ideal_loss[name] = group_loss_k
@@ -151,14 +151,11 @@ class ParetoPCA(PCA):
 
         gap = min_max_eig - max_min_eig
        
-        '''
         if gap < 0:
             self.alpha = 0.1
         else:
             self.alpha = gap + 0.1
-        '''
         
-        self.alpha =  0.5
         print("min_max_eig {} , max_min_eig {}, gap {}, alpha {}".format(min_max_eig,max_min_eig,gap,self.alpha))
 
     def square(self,x):
@@ -174,22 +171,20 @@ class ParetoPCA(PCA):
 
         # needed to turn into a strongly convex problem
         reg_grad = 2*self.alpha*self.PC
-        #reg_grad = reg_grad / np.linalg.norm(reg_grad)
 
         U_grad = -2*self.data.T @ self.data @ self.PC
         #U_grad = U_grad / np.linalg.norm(U_grad)
        
-        #U_grad = U_grad + reg_grad 
-        #U_grad = U_grad / np.linalg.norm(U_grad) +reg_grad
+        U_grad = U_grad + reg_grad 
+        U_grad = U_grad / np.linalg.norm(U_grad) 
         grads = [U_grad]
 
-        #print("Overall loss {}".format(loss(self.data,self.PC)))
 
         subgroup_loss = []
         subgroup_grad = []
 
         for name,data_group in self.data_groups.items():
-            group_loss = loss(data_group,self.PC)
+            group_loss = loss_PCA(data_group,self.PC)
             group_ideal = self.ideal_loss[name]
             subgroup_loss.append(group_loss-group_ideal)
             group_grad = -2*data_group.T @ data_group @ self.PC
@@ -207,7 +202,6 @@ class ParetoPCA(PCA):
                 
                 pairwise_grad = pairwise_grad / np.linalg.norm(pairwise_grad)
                 pairwise_grad = pairwise_grad + reg_grad
-
                 grads.append(pairwise_grad)
         else:
             # directly compute on subgroups
@@ -238,9 +232,9 @@ class ParetoPCA(PCA):
 
         for i in range(len(new_scores)):
             if new_scores[i] > self.loss_progress[i]:
-                #print("Error, something got worse!")
-                #print("old_scores : {}".format(self.loss_progress))
-                #print("new scores : {}".format(new_scores))
+                print("Error, something got worse!")
+                print("old_scores : {}".format(self.loss_progress))
+                print("new scores : {}".format(new_scores))
                 self.loss_progress = new_scores
                 return False
 
@@ -251,11 +245,10 @@ class ParetoPCA(PCA):
     def run(self,all_data,data_groups,max_iter,pairwise):
         
         self.data = all_data
-        self.data_groups = groups
+        self.data_groups = data_groups
         self.pairwise = pairwise
         self.loss_progress = [np.inf]*(len(self.data_groups)+1)
-        #self.optimal_group_projections()
-        self.alpha = 10.0
+        self.optimal_group_projections()
 
         self.PC = np.random.randn(self.data.shape[1],self.n_components)
         total = self.data.shape[1] * self.n_components
@@ -263,9 +256,7 @@ class ParetoPCA(PCA):
         for t in range(1,max_iter):
             
             gradients = self.compute_gradients() 
-            
-            #direction = self.select_direction(gradients)
-            direction = -gradients[0]
+            direction = self.select_direction(gradients)
 
             if t < 10 or t % 10 == 0:
                 print("iteration {}".format(t))
@@ -277,8 +268,8 @@ class ParetoPCA(PCA):
             U_norm = np.linalg.norm(self.PC)
             if U_norm == 0.0:
                 print(direction)
-                quit()
-            
+                break
+
             # zero update direction indicates no possible Pareto-efficient improvement
             small = direction <= 1e-5
 
@@ -289,7 +280,6 @@ class ParetoPCA(PCA):
 
             update = self.PC + learning_rate*direction
             self.PC = self.orthogonal_projection(update)
-            #print("delta U",np.linalg.norm(self.PC - cache))
 
     def select_direction(self,gradients):
         # solve quadratic programming problem for dual function
